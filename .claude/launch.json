@@ -1,0 +1,35 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "AIL Types — sanity check",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["ail_types.py"],
+      "port": 0
+    },
+    {
+      "name": "AIL Transpiler — test cases",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["transpiler.py"],
+      "port": 0
+    },
+    {
+      "name": "AIL Serializer — round-trip",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["serializer.py"],
+      "port": 0
+    },
+    {
+      "name": "AIL Executor — v0.2 tests",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["executor.py"],
+      "port": 0
+    },
+    {
+      "name": "AIL Examples — full demo",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["examples.py"],
+      "port": 0
+    }
+  ]
+}
