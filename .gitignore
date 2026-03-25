@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# AIL generated
+*.ail.bin
+*.opt.ail.bin
+ail_graph.html
+ail_comparison.html
+ail_program.html
+*.html
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Claude worktrees
+.claude/worktrees/

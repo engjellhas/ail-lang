@@ -1,46 +1,81 @@
-# AIL — Artificial Intent Language
+# AIL -- Artificial Intent Language
 
-> An intermediate representation for AI agent execution graphs.  
+> An intent graph IR for AI agents with a built-in cost optimizer.
 > Built for machines. Not for humans.
 
 ---
 
 ## What is AIL?
 
-AIL is not a programming language in the traditional sense.  
-It is an **intent graph IR** — a format for representing what an AI agent needs to *do*, stripped of everything that exists only for human readability.
-
-Conceptually it sits between your high-level agent logic and your LLM execution layer:
+AIL is an **intent graph IR** -- a format for representing what an AI agent needs to *do*, stripped of everything that exists only for human readability.
 
 ```
 Human intent / Prompt
-        ↓
+        |
    Python / DSL
-        ↓
-🔥 AIL graph (this repo)
-        ↓
+        |
+   AIL graph  <-- this repo
+        |
   LLMs / Tools / APIs
+```
+
+**The value proposition:** AIL's optimizer analyzes your AI pipeline and returns a cheaper equivalent -- eliminating duplicate LLM calls, caching deterministic results, routing to cheaper models, and pruning low-confidence branches. Real dollar savings, automatically.
+
+---
+
+## Install
+
+```bash
+pip3 install -e .
+```
+
+Then add to your PATH if needed:
+```bash
+export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+```
+
+No external dependencies for core usage. Optional: `pip3 install anthropic` for real Claude API execution.
+
+---
+
+## CLI
+
+```bash
+ail compile sample.py              # Python -> AIL text
+ail compile sample.py --binary     # Python -> AIL binary
+ail optimize sample.py             # Optimize + show savings report
+ail run sample.py                  # Confidence trace (static analysis)
+ail execute sample.py              # Execute through runtime (mock backend)
+ail execute sample.py --backend anthropic  # Execute against Claude API
+ail price sample.py                # Real $/execution pricing (Anthropic & OpenAI)
+ail viz sample.py                  # Generate interactive HTML graph
+ail viz sample.py -O               # Before/after optimization comparison
+ail bench sample.py                # Full benchmark suite
+ail hash sample.py                 # Content-addressable node IDs
+ail info file.ail.bin              # Inspect binary AIL file
 ```
 
 ---
 
-## Why AIL exists
+## What it does (with real numbers)
 
-Every existing "AI language" or agent framework is Python with fancy syntax on top.  
-They inherit all of Python's assumptions — named variables, sequential execution, binary control flow.
+```
+$ ail price sample.py
 
-AI systems don't need any of that.
+--- ai_pipeline -- Pricing (anthropic) ---
+  Cost/execution:       $0.009440
+  Cost/1K executions:   $9.4400
+  ~:intent  $0.000240  (200in + 20out tok)
+  ~:infer   $0.008400  (800in + 400out tok)
+  ~:rank    $0.000800  (500in + 100out tok)
+  @ 1K/day:  $283.20/mo
+  @ 10K/day: $2832.00/mo
 
-AIL is built around three observations:
-
-**1. Execution is a graph, not a sequence**  
-Dependencies determine order. Topology is semantics.
-
-**2. Uncertainty is not an edge case**  
-AI systems reason probabilistically. Confidence should be a first-class type, not a bolted-on heuristic.
-
-**3. Tokens are the real cost unit**  
-Every byte transmitted between agents costs money. The representation format should minimize that cost without losing semantic fidelity.
+--- Optimized ---
+  Before: $0.017840/exec
+  After:  $0.009440/exec  (saved 47.1%)
+  Monthly savings @ 10K/day: $2,520.00
+```
 
 ---
 
@@ -48,252 +83,156 @@ Every byte transmitted between agents costs money. The representation format sho
 
 ### Intent nodes
 
-Every unit of computation is a typed node with inputs and outputs:
+Every unit of computation is a typed node:
 
 ```
-[⊗:where] ← col:§1, cond:⟨§.score ≥ 0.8⟩ → §2
-[∇:desc]  ← col:§2, key:"score" → §3
-[⊗:limit] ← col:§3, n:#10 → §4
-[io:out]  ← §4
+[io:read] <- src:@db, query:"SELECT * FROM users" -> $2
+[*:where] <- col:$2, cond:<$.score >= 0.8> -> $3
+[*:desc]  <- col:$3, key:"score" -> $4
+[*:limit] <- col:$4, n:#10 -> $5
+[io:out]  <- $5
 ```
-
-No loops. No variable declarations. No syntax noise.  
-Just a graph of what flows into what and what happens to it.
-
-### Graph references (`§N`)
-
-There are no named variables. Everything is referenced by graph position, scoped per `⟦⟧` block.
-
-```
-§0   — first value in scope
-§1   — second derived value
-§∞0  — streaming / lazy edge
-```
-
-Zero naming overhead. Zero ambiguity.
 
 ### Probabilistic type (`~`)
 
-The most important thing AIL has that no existing IR has.
+The most important thing AIL has that no existing IR has. Confidence propagates through the graph mathematically:
 
 ```
-~0.92:"purchase"     — "purchase" with 92% confidence
-~+:§0.intent         — high-confidence inference result  
-~?:user.churn_risk   — uncertain boolean
+~0.9 -> [map]   -> ~0.9    (preserved)
+~0.9 + ~0.8 -> [merge] -> ~0.72  (compounded: 0.9 x 0.8)
+~0.9 -> [infer] -> ~new    (reset by inference)
 ```
 
-Confidence propagates through the graph mathematically.  
-One uncertain input makes downstream outputs uncertain — automatically.
+One uncertain input makes downstream outputs uncertain -- automatically. The optimizer uses this to prune branches where confidence drops below a threshold, skipping all downstream LLM calls.
 
 ### AI-native nodes
 
 Operations that have no equivalent in any human language:
 
-| Node | Description |
-|------|-------------|
-| `[~:infer]` | Probabilistic inference → returns `~confidence:value` |
-| `[~:intent]` | Classify intent from unstructured input |
-| `[~:embed]` | Semantic embedding |
-| `[~:sim]` | Cosine similarity between embeddings |
-| `[~:rank]` | Rank collection by confidence score |
-| `[~:threshold]` | Gate execution on minimum confidence |
+| Node | What it does | Cost |
+|------|-------------|------|
+| `[~:infer]` | LLM inference -> ~confidence:value | ~$0.0084 |
+| `[~:intent]` | Classify intent from text | ~$0.0002 |
+| `[~:embed]` | Semantic embedding (cacheable) | ~$0.0001 |
+| `[~:sim]` | Cosine similarity | free |
+| `[~:rank]` | LLM-assisted ranking | ~$0.0008 |
+| `[~:threshold]` | Gate on minimum confidence | free |
 
 ---
 
-## A complete example
+## The optimizer (the monetizable core)
 
-**Python source:**
-```python
-async def get_top_users(db, min_score=0.8):
-    users = await db.query("SELECT * FROM users")
-    scored = [u for u in users if u['score'] >= min_score]
-    scored.sort(key=lambda u: u['score'], reverse=True)
-    return scored[:10]
-```
+6-pass pipeline that takes an AIL graph and returns a cheaper equivalent:
 
-**AIL output:**
-```
-⟦ get_top_users
-  [io:in]   ← param:"db" → §∞0
-  [io:in]   ← param:"min_score" → §1
-  [io:read] ← src:§∞0, query:"SELECT * FROM users" → §2
-  [⊗:where] ← col:§2, cond:⟨§.score ≥ min_score⟩ → §3
-  [∇:desc]  ← col:§3, key:"score" → §4
-  [⊗:limit] ← col:§4, n:#10 → §5
-  [io:out]  ← §5
-⟧
-```
-
-**Binary encoding:** 151 bytes. Round-trip verified.  
-**Text → Binary compression:** ~49%
+| Pass | What it does | Example savings |
+|------|-------------|-----------------|
+| Filter fusion | Collapse 3 sequential filters into 1 | Fewer nodes |
+| Dead node elimination | Remove nodes whose outputs are never consumed | -1 to -N nodes |
+| Confidence pruning | Cut branches where ~ drops below threshold | Skip downstream LLM calls |
+| Duplicate elimination | Merge identical nodes (same type + inputs) | -50% on duplicated infer |
+| Model annotation | Route ~:intent to Haiku instead of Sonnet | $0.0084 -> $0.0008 |
+| Cache marking | Flag cacheable subgraphs for memoization | $0.000120 -> $0.000012 |
 
 ---
 
-## Agent-to-agent communication
-
-Instead of transmitting natural language instructions between agents:
-
-```
-"Please fetch all user records from the database, filter those with 
-engagement scores above 0.8, sort by score descending, return top 10."
-```
-
-Agents transmit AIL binary — unambiguous, compact, executable:
-
-```
-⟦ task
-  [io:read] ← src:@db, tbl:"users" → §1
-  [⊗:where] ← col:*§1, cond:⟨§.engagement ≥ %0.8⟩ → §2
-  [∇:desc]  ← col:*§2, key:"engagement" → §3
-  [⊗:limit] ← col:*§3, n:#10 → §4
-  [io:out]  ← §4
-⟧
-```
-
-Same semantics. No ambiguity. Dramatically lower token cost at scale.
-
----
-
-## Installation
-
-```bash
-git clone https://github.com/engjellhas/ail-lang
-cd ail-lang
-pip install -r requirements.txt
-```
-
-No external dependencies for core usage. Python 3.10+.
-
----
-
-## Usage
-
-### Transpile Python → AIL
+## Python API
 
 ```python
-from transpiler.transpiler import transpile
+from transpiler import transpile
+from optimizer import optimize_program
+from pricing import price_program, compare_pricing
+from runtime import Runtime, MockBackend, AnthropicBackend
+from visualizer import render_html
+import asyncio
 
-source = """
-def classify_user(user):
-    if user['score'] > 0.9:
-        return 'premium'
-    elif user['score'] > 0.5:
-        return 'standard'
-    else:
-        return 'basic'
-"""
+# Transpile
+prog = transpile(open("sample.py").read())
 
-program = transpile(source)
-print(program.to_ail())
-```
+# Optimize
+opt_prog, reports = optimize_program(prog)
+for r in reports:
+    print(r.summary())  # nodes eliminated, tokens saved
 
-### Encode to binary
+# Price
+for r in price_program(prog, "anthropic"):
+    print(r.summary())  # $/execution, monthly projections
 
-```python
-from transpiler.serializer import encode, decode
+# Execute (mock)
+rt = Runtime(backend=MockBackend())
+result = asyncio.run(rt.execute(prog))
+print(result.summary())
 
-binary = encode(program)        # bytes
-recovered = decode(binary)      # AILProgram
-print(recovered.to_ail())       # identical output
-```
+# Execute (real Claude API)
+rt = Runtime(backend=AnthropicBackend())
+result = asyncio.run(rt.execute(prog))
 
-### Build a program manually
-
-```python
-from transpiler.ail_types import AILProgram, AILScope, AILNode, InputBinding, InlineExpr
-
-scope = AILScope("my_agent")
-r0 = scope.next_ref()
-r1 = scope.next_ref()
-
-scope.add_node(AILNode("io:in", outputs=[r0]))
-scope.add_node(AILNode("⊗:where",
-    inputs=[
-        InputBinding("col", r0),
-        InputBinding("cond", InlineExpr("§.score ≥ 0.8"))
-    ],
-    outputs=[r1]))
-scope.add_node(AILNode("io:out",
-    inputs=[InputBinding("val", r1)],
-    outputs=[]))
-
-program = AILProgram()
-program.add_scope(scope)
-print(program.to_ail())
+# Visualize
+html = render_html(prog.scopes[0])
+open("graph.html", "w").write(html)
 ```
 
 ---
 
-## Repository structure
+## Architecture
 
 ```
 ail-lang/
-├── transpiler/
-│   ├── ail_types.py      # Core type system — nodes, refs, scopes, ~ type
-│   ├── transpiler.py     # Python → AIL transpiler
-│   └── serializer.py     # Binary encoder/decoder (round-trip verified)
-├── spec/
-│   └── AIL_SPEC_v0.1.md  # Formal language specification
-├── examples/
-│   └── examples.py       # Annotated usage examples
-├── bench/
-│   └── benchmark.py      # Token compression benchmarks
-└── README.md
+  ail_types.py      Core type system -- nodes, refs, scopes, ~ type
+  transpiler.py      Python -> AIL transpiler
+  serializer.py      Binary encoder/decoder (~49% compression)
+  executor.py        ~ confidence propagation, DAG scheduler, ! error flow
+  cost_model.py      Token cost estimates, model tiers, cacheability flags
+  optimizer.py       6-pass graph optimizer (the monetizable core)
+  hash_ids.py        Content-addressable node IDs (SHA-256)
+  runtime.py         Executes graphs against real backends (Claude, mock)
+  pricing.py         Real $/token pricing (Anthropic, OpenAI)
+  visualizer.py      Interactive HTML DAG renderer
+  benchmark.py       Full benchmark suite
+  cli.py             CLI toolchain (ail compile/optimize/run/execute/price/viz)
+  pyproject.toml     pip install ready
 ```
 
 ---
 
-## Current status
+## Status
 
 | Component | Status |
 |-----------|--------|
-| Type system | ✅ Complete |
-| Symbol vocabulary | ✅ Complete |
-| Python → AIL transpiler | ✅ Working (core subset) |
-| Binary serializer | ✅ Working, round-trip verified |
-| Formal spec v0.1 | ✅ Published |
-| Execution model / runtime | 🔄 In progress |
-| Uncertainty propagation math | 🔄 In progress |
-| Optimizer (node collapsing, cost model) | 📋 Planned |
-| Multi-agent communication layer | 📋 Planned |
+| Type system + node registry | Done |
+| Python -> AIL transpiler | Done |
+| Binary serializer (round-trip verified) | Done |
+| ~ confidence propagation math | Done |
+| DAG scheduler (parallel execution) | Done |
+| ! error propagation | Done |
+| Cost model (token estimates, tiers, cacheability) | Done |
+| 6-pass graph optimizer | Done |
+| Content-addressable hash IDs | Done |
+| Runtime engine (mock + Anthropic backends) | Done |
+| Real pricing (Anthropic/OpenAI) | Done |
+| Interactive graph visualizer | Done |
+| CLI toolchain | Done |
+| pip package | Done |
+| Formal spec v0.1 | Done |
+| TypeScript transpiler | Planned |
+| Multi-agent communication layer | Planned |
+| Hosted optimizer API | Planned |
 
 ---
 
-## What's next (v0.2)
+## Run tests
 
-- **Execution semantics** — node scheduling, parallelism model, uncertainty propagation
-- **Cost model** — token cost per node, model selection hints, caching strategy  
-- **Hash-based node IDs** — replace `§N` positional refs with content-addressable IDs for large graphs
-- **AIL Optimizer** — collapse redundant nodes, reduce token cost, route by complexity
-
----
-
-## The probabilistic type system (why this matters)
-
-Every existing agent framework treats uncertainty as an afterthought — logprobs bolted on after the fact, confidence scores as metadata, not as values that flow through computation.
-
-AIL makes uncertainty compositional:
-
+```bash
+python3 executor.py       # ~ propagation, scheduling, error flow
+python3 cost_model.py     # token costs, tiers, cacheability
+python3 optimizer.py      # filter fusion, dead node elim, pruning, dedup
+python3 hash_ids.py       # content-addressable hashing, dedup
+python3 runtime.py        # runtime execution, caching, parallel IO
+python3 pricing.py        # real pricing, cross-provider comparison
+python3 visualizer.py     # HTML graph generation
+python3 benchmark.py      # full benchmark suite
 ```
-[~:infer] ← input:§0 → ~0.87:§1        # inference with confidence
-[~:threshold] ← val:§1, min:~+          # gate on high confidence  
-[⊢:prob] ← ~§1 → §2                    # probabilistic branch
-```
 
-When a `~` value flows into a node, the output inherits and compounds that uncertainty automatically. This is the behavior AI systems actually have — AIL just makes it explicit and traceable.
-
----
-
-## Contributing
-
-This is early stage. The most valuable contributions right now:
-
-1. **Execution model proposals** — how should nodes be scheduled? how does `~` propagate mathematically?
-2. **Additional transpiler targets** — TypeScript, Rust source → AIL
-3. **Real-world graph examples** — agent pipelines expressed in AIL
-4. **Benchmarks** — token cost comparisons on real agent workloads
-
-Open an issue or start a discussion.
+All modules end with `ALL TESTS PASSED`.
 
 ---
 
@@ -303,5 +242,5 @@ MIT
 
 ---
 
-*AIL v0.1 — Initial release*  
+*AIL v0.4*
 *Built by [@engjellhas](https://github.com/engjellhas)*

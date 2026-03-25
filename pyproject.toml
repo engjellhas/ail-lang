@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "ail-lang"
@@ -8,7 +8,7 @@ version = "0.4.0"
 description = "AIL -- Artificial Intent Language: an intent graph IR for AI agents"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 authors = [
     {name = "Engjell Hasani", email = "engjell@sooul.ai"},
 ]
