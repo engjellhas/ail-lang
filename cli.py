@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-AIL v0.3 — CLI Toolchain
+AIL v0.4 -- CLI Toolchain
 Usage:
-    ail compile <file.py>              Transpile Python → AIL text
-    ail compile <file.py> --binary     Transpile Python → AIL binary
+    ail compile <file.py>              Transpile Python -> AIL text
+    ail compile <file.py> --binary     Transpile Python -> AIL binary
     ail optimize <file.py>             Transpile + optimize, show report
     ail run <file.py>                  Transpile + execute (confidence trace)
+    ail execute <file.py>              Transpile + run through runtime (real execution)
     ail hash <file.py>                 Transpile + show hash-based node IDs
     ail bench <file.py>                Transpile + benchmark (optimized vs unoptimized)
+    ail price <file.py>                Transpile + show real pricing (Anthropic/OpenAI)
+    ail viz <file.py>                  Transpile + generate interactive HTML graph
     ail info <file.ail.bin>            Decode binary and show stats
 
 Options:
@@ -15,6 +18,7 @@ Options:
     --json                 Output as JSON
     --binary               Output binary format
     --quiet                Suppress banner
+    --provider <str>       Pricing provider: anthropic|openai (default: anthropic)
 """
 
 from __future__ import annotations
@@ -44,7 +48,7 @@ BANNER = """
    / \\  |_ _| |
   / _ \\  | || |
  / ___ \\ | || |___
-/_/   \\_\\___|_____|  v0.3
+/_/   \\_\\___|_____|  v0.4
 
 Artificial Intent Language
 """
@@ -217,6 +221,95 @@ def cmd_bench(args):
         print(rep.summary())
 
 
+def cmd_execute(args):
+    """Transpile and execute through the runtime (real execution)."""
+    import asyncio
+    from runtime import Runtime, MockBackend, AnthropicBackend
+
+    source = Path(args.file).read_text()
+    prog = transpile(source)
+
+    if args.optimize:
+        threshold = args.threshold or 0.1
+        prog, reports = optimize_program(prog, confidence_threshold=threshold)
+        for r in reports:
+            print(r.summary())
+            print()
+
+    # Choose backend
+    if args.backend == "anthropic":
+        backend = AnthropicBackend()
+    else:
+        backend = MockBackend()
+
+    rt = Runtime(backend=backend)
+
+    async def run():
+        return await rt.execute(prog)
+
+    result = asyncio.run(run())
+    print(result.summary())
+
+    for sr in result.scope_results:
+        print(sr.trace())
+
+
+def cmd_price(args):
+    """Show real pricing analysis."""
+    from pricing import price_program, compare_pricing
+
+    source = Path(args.file).read_text()
+    prog = transpile(source)
+
+    provider = getattr(args, "provider", "anthropic")
+    reports = price_program(prog, provider)
+    for r in reports:
+        print(r.summary())
+
+    # Also show optimized pricing
+    if not getattr(args, "no_optimize", False):
+        threshold = getattr(args, "threshold", 0.1) or 0.1
+        opt_prog, _ = optimize_program(prog, confidence_threshold=threshold)
+        print("\n── Optimized ──────────────────────────────────")
+        opt_reports = price_program(opt_prog, provider)
+        for r in opt_reports:
+            print(r.summary())
+
+        # Comparison
+        for before_scope, after_scope in zip(prog.scopes, opt_prog.scopes):
+            print()
+            print(compare_pricing(before_scope, after_scope, provider))
+
+
+def cmd_viz(args):
+    """Generate interactive HTML graph visualization."""
+    from visualizer import render_html, render_comparison, render_program
+
+    source = Path(args.file).read_text()
+    prog = transpile(source)
+
+    provider = getattr(args, "provider", "anthropic")
+
+    if args.optimize:
+        opt_prog, _ = optimize_program(prog)
+        # Render comparison for each scope
+        for before, after in zip(prog.scopes, opt_prog.scopes):
+            from visualizer import render_comparison
+            html = render_comparison(before, after, pricing_provider=provider)
+            out_path = Path(args.file).with_suffix(f".comparison.html")
+            if args.output:
+                out_path = Path(args.output)
+            out_path.write_text(html)
+            print(f"Comparison: {out_path}")
+    else:
+        html = render_program(prog, pricing_provider=provider)
+        out_path = Path(args.file).with_suffix(".html")
+        if args.output:
+            out_path = Path(args.output)
+        out_path.write_text(html)
+        print(f"Graph: {out_path}")
+
+
 def cmd_info(args):
     """Decode and inspect a binary AIL file."""
     data = Path(args.file).read_bytes()
@@ -295,6 +388,35 @@ def main():
     p_bench.add_argument("--threshold", "-t", type=float, default=0.1,
                          help="Confidence pruning threshold")
 
+    # execute (runtime)
+    p_exec = sub.add_parser("execute", parents=[shared], help="Run through runtime engine")
+    p_exec.add_argument("file", help="Python source file")
+    p_exec.add_argument("--optimize", "-O", action="store_true",
+                        help="Optimize before executing")
+    p_exec.add_argument("--threshold", "-t", type=float, default=0.1,
+                        help="Confidence pruning threshold")
+    p_exec.add_argument("--backend", choices=["mock", "anthropic"], default="mock",
+                        help="Backend to use (default: mock)")
+
+    # price
+    p_price = sub.add_parser("price", parents=[shared], help="Show real pricing")
+    p_price.add_argument("file", help="Python source file")
+    p_price.add_argument("--provider", choices=["anthropic", "openai"], default="anthropic",
+                         help="Pricing provider")
+    p_price.add_argument("--threshold", "-t", type=float, default=0.1,
+                         help="Confidence pruning threshold")
+    p_price.add_argument("--no-optimize", action="store_true",
+                         help="Skip optimization comparison")
+
+    # viz
+    p_viz = sub.add_parser("viz", parents=[shared], help="Generate HTML graph visualization")
+    p_viz.add_argument("file", help="Python source file")
+    p_viz.add_argument("--optimize", "-O", action="store_true",
+                       help="Show before/after comparison")
+    p_viz.add_argument("--output", "-o", help="Output HTML path")
+    p_viz.add_argument("--provider", choices=["anthropic", "openai"], default="anthropic",
+                       help="Pricing provider")
+
     # info
     p_info = sub.add_parser("info", parents=[shared], help="Inspect binary AIL file")
     p_info.add_argument("file", help="Binary AIL file (.ail.bin)")
@@ -312,8 +434,11 @@ def main():
         "compile": cmd_compile,
         "optimize": cmd_optimize,
         "run": cmd_run,
+        "execute": cmd_execute,
         "hash": cmd_hash,
         "bench": cmd_bench,
+        "price": cmd_price,
+        "viz": cmd_viz,
         "info": cmd_info,
     }
 

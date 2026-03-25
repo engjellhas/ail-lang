@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "ail-lang"
+version = "0.4.0"
+description = "AIL -- Artificial Intent Language: an intent graph IR for AI agents"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Engjell Hasani", email = "engjell@sooul.ai"},
+]
+keywords = ["ai", "ir", "intent-graph", "llm", "optimizer", "agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40.0"]
+all = ["anthropic>=0.40.0"]
+
+[project.scripts]
+ail = "cli:main"
+
+[project.urls]
+Homepage = "https://github.com/engjellhas/ail-lang"
+Repository = "https://github.com/engjellhas/ail-lang"
+
+[tool.setuptools]
+py-modules = [
+    "ail_types",
+    "transpiler",
+    "serializer",
+    "executor",
+    "cost_model",
+    "optimizer",
+    "hash_ids",
+    "runtime",
+    "pricing",
+    "visualizer",
+    "benchmark",
+    "cli",
+]
